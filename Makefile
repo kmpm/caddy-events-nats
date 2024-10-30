@@ -2,9 +2,11 @@
 #
 # SPDX-License-Identifier: CC0-1.0
 
-export XCADDY_SETCAP=1
+FILES_CC0 = go.sum go.mod Caddyfile .gitignore .markdownlint.yaml contrib/*.*
+FILES_APACHE = README.md Makefile *.go 
+
 build:
-	xcaddy build
+	xcaddy build --with github.com/kmpm/caddy-events-nats@latest
 
 tools:
 	@echo "installing tools"
@@ -16,8 +18,8 @@ reuse:
 
 annotate:
 	@echo "annotating code"
-	reuse annotate --copyright "NONE" --year "" --license "CC0-1.0" --skip-unrecognised --skip-existing go.sum Caddyfile .gitignore
-	reuse annotate --copyright "Peter Magnusson"  --license "Apache-2.0" --skip-unrecognised --skip-existing README.md *.go Makefile
+	reuse annotate --copyright "NONE" --year "" --license "CC0-1.0" --skip-unrecognised --skip-existing $(FILES_CC0)
+	reuse annotate --copyright "Peter Magnusson"  --license "Apache-2.0" --skip-unrecognised --skip-existing $(FILES_APACHE)
 
 audit:
 	@echo "running audit checks"
@@ -37,6 +39,9 @@ tidy:
 run:
 	xcaddy run 
 
+validate:
+	xcaddy validate
+
 adapt:
 	xcaddy adapt  | jq > Caddyfile.json
 
@@ -46,5 +51,5 @@ fmt:
 module:
 	xcaddy list-modules | grep 'events.handlers'
 
-precommit: audit tidy reuse
+pre-commit: audit fmt tidy reuse 
 	@echo "precommit checks passed"
