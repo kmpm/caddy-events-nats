@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 Peter Magnusson <me@kmpm.se>
+// SPDX-FileCopyrightText: NONE
 //
 // SPDX-License-Identifier: CC0-1.0
 
