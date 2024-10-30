@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2024 Peter Magnusson <me@kmpm.se>
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Publish NATS messages on Caddy Events
 
 This is the `events.handlers.nats` Caddy module.

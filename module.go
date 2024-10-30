@@ -1,4 +1,7 @@
-// Copyright 2024	Peter Magnusson <me@kmpm.se>
+// SPDX-FileCopyrightText: 2024 Peter Magnusson <me@kmpm.se>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package caddynats
 
 import (

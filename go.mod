@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Peter Magnusson <me@kmpm.se>
+//
+// SPDX-License-Identifier: CC0-1.0
+
 module github.com/kmpm/caddy-events-nats
 
 go 1.22.4
