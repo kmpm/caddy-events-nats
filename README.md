@@ -12,9 +12,14 @@ It publishes messages to a NATS server for Caddy events.
 __It is EXPERIMENTAL and subject to change__.
 This module might never stabelize.
 
+> [!NOTE]
+> This is not an official repository of the
+> [Caddy Web Server](https://github.com/caddyserver) organization.
+
 ## CloudEvent
 
-Each message payload is a json encoded CloudEvent stuct from [caddyevents](https://github.com/caddyserver/caddy/blob/master/modules/caddyevents/app.go)
+Each message payload is a json encoded CloudEvent stuct from
+[caddyevents](https://github.com/caddyserver/caddy/blob/master/modules/caddyevents/app.go)
 
 ```go
 type CloudEvent struct {
@@ -28,6 +33,8 @@ type CloudEvent struct {
 }
 ```
 
+See [cloudevents.io](https://cloudevents.io) for general information about the format.
+
 ## Installation
 
 Using [xcaddy](https://github.com/caddyserver/xcaddy) is the simplest method.
@@ -39,6 +46,14 @@ xcaddy build --with github.com/kmpm/caddy-events-nats
 ## Usage
 
 Configure with Caddyfile or JSON.
+Possible events to capture is...
+
+| Source | Type                | Notes |
+|--------|---------------------|-------------|
+| tls    | tls_get_certificate | Whenever cert is used. |
+| tls    | cached_managed_cert | A cert is cached in memory. For example after caddy starts or a cert was obtained |
+| tls    | cert_obtaining      | A cert is being created    |
+| tls    | cert_obtained       | A cert was created         |
 
 _Note:_ On `caddy validate` the module gets provisioned fully. That has the
 consequence that a connection to the NATS server is made and validation will fail
