@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"text/template"
+	"time"
 
 	"bytes"
 
@@ -189,8 +190,10 @@ func (h *NatsHandler) Handle(ctx context.Context, event caddyevents.Event) error
 	}
 	header := make(nats.Header)
 	header.Add("Content-Type", "application/json")
-	// header.Add("X-CloudEvent-ID", event.ID)
-	// header.Add("X-Timestamp", event.)
+	if false {
+		header.Add("X-CloudEvent-ID", ce.ID)
+		header.Add("X-CloudEvent-Time", ce.Time.Format(time.RFC3339))
+	}
 	m.Header = header
 
 	err = h.nc.PublishMsg(m)
