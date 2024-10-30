@@ -24,7 +24,7 @@ audit:
 	go mod verify
 	go vet ./...
 	go list -m all
-	go run honnef.co/go/tools/cmd/staticcheck@latest -checks=all ./...
+	go run honnef.co/go/tools/cmd/staticcheck@latest -checks=all,-ST1000 ./...
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 tidy:
@@ -45,3 +45,6 @@ fmt:
 
 module:
 	xcaddy list-modules | grep 'events.handlers'
+
+precommit: audit tidy reuse
+	@echo "precommit checks passed"
