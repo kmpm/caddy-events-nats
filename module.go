@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"text/template"
 
@@ -20,24 +21,31 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	minCredsSize = 800
+)
+
 func init() {
 	caddy.RegisterModule(NatsHandler{})
 }
 
 type NatsHandler struct {
-	logger        *zap.Logger
-	clientOptions []nats.Option
+	logger *zap.Logger
+
 	nc            *nats.Conn
 	t             *template.Template
 	connected     bool
+	firstConneted bool
+	natsOptions   []nats.Option
 	mustPublish   bool
 	MustPublish   string `json:"must_publish,omitempty"`
 	ServerURL     string `json:"server_url,omitempty"`
 	Subject       string `json:"subject,omitempty"`
-	Username      string `json:"username,omitempty"`
-	Password      string `json:"password,omitempty"`
-	Token         string `json:"token,omitempty"`
-	NKeyFile      string `json:"nkey_file,omitempty"`
+	AuthUser      string `json:"auth_user,omitempty"`
+	AuthPassword  string `json:"auth_password,omitempty"`
+	AuthToken     string `json:"auth_token,omitempty"`
+	AuthNKey      string `json:"auth_nkey,omitempty"`
+	AuthCreds     string `json:"auth_creds,omitempty"`
 }
 
 func (NatsHandler) CaddyModule() caddy.ModuleInfo {
@@ -48,9 +56,31 @@ func (NatsHandler) CaddyModule() caddy.ModuleInfo {
 }
 
 func (h *NatsHandler) Provision(ctx caddy.Context) error {
+	var err error
 	h.logger = ctx.Logger(h)
 	h.logger.Debug("provisioning nats handler")
-	var err error
+	h.validate()
+
+	opts := make([]nats.Option, 0)
+
+	if h.AuthNKey != "" {
+		opt, err := nats.NkeyOptionFromSeed(h.AuthNKey)
+		if err != nil {
+			return fmt.Errorf("failed to read nkey from file: %w", err)
+		}
+		opts = append(opts, opt)
+	}
+	if h.AuthPassword != "" {
+		opts = append(opts, nats.UserInfo(h.AuthUser, h.AuthPassword))
+	}
+	if h.AuthToken != "" {
+		opts = append(opts, nats.Token(h.AuthToken))
+	}
+	if h.AuthCreds != "" {
+		opts = append(opts, nats.UserCredentials(h.AuthCreds))
+	}
+	h.natsOptions = opts
+
 	if strings.Contains(h.Subject, "{{") {
 		t := template.New("subject")
 		h.t, err = t.Parse(h.Subject)
@@ -67,19 +97,34 @@ func (h *NatsHandler) Provision(ctx caddy.Context) error {
 		h.mustPublish = false
 	}
 
-	nc, err := nats.Connect(h.ServerURL, h.clientOptions...)
+	err = h.connect()
+	if err != nil {
+		return fmt.Errorf("failed to connect to nats: %w", err)
+	}
+
+	h.logger.Debug("nats handler provisioned")
+
+	return nil
+}
+
+func (h *NatsHandler) connect() error {
+	if h.firstConneted {
+		return nil
+	}
+
+	nc, err := nats.Connect(h.ServerURL, h.natsOptions...)
 	if err != nil {
 		return err
 	}
 	h.logger.Info("nats client connected to server", zap.String("server", nc.ConnectedAddr()))
-
+	h.firstConneted = true
 	//TODO: set client handlers
 	nc.SetErrorHandler(func(conn *nats.Conn, sub *nats.Subscription, err error) {
 		h.logger.Error("nats error", zap.Error(err), zap.Bool("connected", h.connected))
 	})
 	nc.SetDisconnectHandler(func(conn *nats.Conn) {
 		h.connected = false
-		h.logger.Info("nats disconnected", zap.Bool("connected", h.connected))
+		h.logger.Warn("nats disconnected", zap.Bool("connected", h.connected))
 
 	})
 	nc.SetReconnectHandler(func(conn *nats.Conn) {
@@ -97,8 +142,16 @@ func (h *NatsHandler) Provision(ctx caddy.Context) error {
 	})
 	h.nc = nc
 	h.connected = true
-	h.logger.Debug("nats handler provisioned")
+	return nil
+}
 
+func (h *NatsHandler) Cleanup() error {
+	h.logger.Debug("cleaning up nats handler")
+	if h.nc != nil {
+		h.nc.Close()
+		h.connected = false
+		h.nc = nil
+	}
 	return nil
 }
 
@@ -154,7 +207,10 @@ func (h *NatsHandler) Handle(ctx context.Context, event caddyevents.Event) error
 	return nil
 }
 
-func (h *NatsHandler) Validate() error {
+// Validate ensures the handler is properly configured.
+func (h *NatsHandler) validate() error {
+	h.logger.Debug("validating nats handler")
+
 	if h.ServerURL == "" {
 		return fmt.Errorf("server url is required")
 	}
@@ -165,7 +221,6 @@ func (h *NatsHandler) Validate() error {
 	if _, err := t.Parse(h.Subject); err != nil {
 		return fmt.Errorf("failed to parse subject template: %w", err)
 	}
-	//TODO: validate subject format
 
 	if h.MustPublish != "" {
 		//can only be 'on', 'off' or empty
@@ -173,28 +228,46 @@ func (h *NatsHandler) Validate() error {
 			return fmt.Errorf("must_publish must be 'on' or 'off'")
 		}
 	}
-	if h.NKeyFile != "" {
-		opt, err := nats.NkeyOptionFromSeed(h.NKeyFile)
-		if err != nil {
-			return err
+	if h.AuthNKey != "" {
+		//check if file exists
+		if _, err := nats.NkeyOptionFromSeed(h.AuthNKey); err != nil {
+			return fmt.Errorf("failed to read nkey from file: %w", err)
 		}
-		if h.Username != "" {
-			return fmt.Errorf("username and nkey_file are mutually exclusive")
+		//check exclusivity
+		if h.AuthUser != "" || h.AuthPassword != "" || h.AuthToken != "" {
+			return fmt.Errorf("auth_nkey must be used exclusively")
 		}
-		h.clientOptions = append(h.clientOptions, opt)
 	}
-	if h.Username != "" {
-		if h.Password == "" && h.Token == "" {
-			return fmt.Errorf("password or token is required")
+	if h.AuthToken != "" {
+		//check exclusivity
+		if h.AuthUser != "" || h.AuthPassword != "" || h.AuthNKey != "" {
+			return fmt.Errorf("auth_token must be used exclusively")
 		}
-		if h.Password != "" && h.Token != "" {
-			return fmt.Errorf("password and token are mutually exclusive")
+	}
+	if h.AuthUser != "" || h.AuthPassword != "" {
+		if h.AuthUser == "" {
+			return fmt.Errorf("auth_user is required when using auth_password")
 		}
-		if h.Password != "" {
-			h.clientOptions = append(h.clientOptions, nats.UserInfo(h.Username, h.Password))
+		if h.AuthPassword == "" {
+			return fmt.Errorf("auth_password is required when using auth_user")
 		}
-		if h.Token != "" {
-			h.clientOptions = append(h.clientOptions, nats.Token(h.Token))
+		//check exclusivity
+		if h.AuthToken != "" || h.AuthNKey != "" {
+			return fmt.Errorf("auth_user and auth_password cannot be used with any other auth_ argument")
+		}
+	}
+	if h.AuthCreds != "" {
+		//check if file exists using stat
+		if f, err := os.Stat(h.AuthCreds); err != nil {
+			return fmt.Errorf("failed to read creds from file: %w", err)
+		} else if f.IsDir() {
+			return fmt.Errorf("creds path is a directory")
+		} else if f.Size() < minCredsSize {
+			return fmt.Errorf("creds file is too small to be a valid creds file")
+		}
+		//check exclusivity
+		if h.AuthUser != "" || h.AuthPassword != "" || h.AuthToken != "" || h.AuthNKey != "" {
+			return fmt.Errorf("auth_creds must be used exclusively")
 		}
 	}
 	return nil
@@ -214,20 +287,24 @@ func (h *NatsHandler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			if !d.Args(&h.Subject) {
 				return d.ArgErr()
 			}
-		case "username":
-			if !d.Args(&h.Username) {
+		case "auth_user":
+			if !d.Args(&h.AuthUser) {
 				return d.ArgErr()
 			}
-		case "password":
-			if !d.Args(&h.Password) {
+		case "auth_password":
+			if !d.Args(&h.AuthPassword) {
 				return d.ArgErr()
 			}
-		case "token":
-			if !d.Args(&h.Token) {
+		case "auth_token":
+			if !d.Args(&h.AuthToken) {
 				return d.ArgErr()
 			}
-		case "nkey_file":
-			if !d.Args(&h.NKeyFile) {
+		case "auth_nkey":
+			if !d.Args(&h.AuthNKey) {
+				return d.ArgErr()
+			}
+		case "auth_creds":
+			if !d.Args(&h.AuthCreds) {
 				return d.ArgErr()
 			}
 		case "must_publish":
@@ -247,5 +324,5 @@ var (
 	_ caddyfile.Unmarshaler = (*NatsHandler)(nil)
 	_ caddy.Provisioner     = (*NatsHandler)(nil)
 	_ caddyevents.Handler   = (*NatsHandler)(nil)
-	_ caddy.Validator       = (*NatsHandler)(nil)
+	_ caddy.CleanerUpper    = (*NatsHandler)(nil)
 )
