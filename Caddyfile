@@ -1,17 +1,33 @@
-// SPDX-FileCopyrightText: NONE
-//
-// SPDX-License-Identifier: CC0-1.0
+# SPDX-FileCopyrightText: NONE
+#
+# SPDX-License-Identifier: CC0-1.0
 {
-	#debug
+	debug
 	auto_https disable_redirects
 	events {
-		on * nats {
-			server_url nats://localhost:4222
+		on "*" nats {
 			subject "caddy.events.{{.Source}}.{{.Type}}"
+			server_url nats://localhost:4222
+
+			# - tls server example -
+			# server_url tls://connect.ngs.global
+
+			# - user and password - 
+			# auth_user local
+			# auth_password "UVZ16q13zrQmsb7ef0k54x6RgXQvcSka"
+
+			# - or token -
+			# auth_token "s3cr3t"
+
+			# - or nkey -
+			# auth_nkey ./contrib/user.nk
+
+			# - or creds file -
+			# auth_creds ./NGS-Default-CLI.creds
 		}
 	}
 }
 
 localhost:2015 {
-	respond "Hello\n"
+	respond "Hello"
 }
