@@ -118,19 +118,17 @@ func (h *NatsHandler) connect() error {
 	}
 	h.logger.Info("nats client connected to server", zap.String("server", nc.ConnectedAddr()))
 	h.firstConneted = true
-	//TODO: set client handlers
+	//setup event handlers
 	nc.SetErrorHandler(func(conn *nats.Conn, sub *nats.Subscription, err error) {
 		h.logger.Error("nats error", zap.Error(err), zap.Bool("connected", h.connected))
 	})
 	nc.SetDisconnectHandler(func(conn *nats.Conn) {
 		h.connected = false
 		h.logger.Warn("nats disconnected", zap.Bool("connected", h.connected))
-
 	})
 	nc.SetReconnectHandler(func(conn *nats.Conn) {
 		h.connected = true
 		h.logger.Info("nats reconnected", zap.Bool("connected", h.connected), zap.String("server", conn.ConnectedAddr()))
-
 	})
 	nc.SetClosedHandler(func(conn *nats.Conn) {
 		h.connected = false
