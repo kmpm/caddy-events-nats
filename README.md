@@ -10,7 +10,7 @@ This is the `events.handlers.nats` Caddy module.
 It publishes messages to a NATS server for Caddy events.
 
 __It is EXPERIMENTAL and subject to change__.
-This module might never stabelize.
+This module might never stabilize.
 
 > [!NOTE]
 > This is not an official repository of the
