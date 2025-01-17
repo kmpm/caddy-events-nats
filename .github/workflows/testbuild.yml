@@ -1,5 +1,6 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+# SPDX-FileCopyrightText: 2024 Peter Magnusson <me@kmpm.se>
+#
+# SPDX-License-Identifier: CC0-1.0
 
 name: Testbuild
 
@@ -21,8 +22,14 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Check code
-      run: make tidy audit
+    - name: Tidy code
+      run: make tidy
 
     - name: Install tools
       run: make tools
+
+    - name: Build with xcaddy
+      run: make
+
+    - name: audit code and check for REUSE compliance
+      run: make audit reuse no-dirty
