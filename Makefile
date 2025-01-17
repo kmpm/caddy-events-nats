@@ -2,8 +2,10 @@
 #
 # SPDX-License-Identifier: CC0-1.0
 
-FILES_CC0 = go.sum go.mod Caddyfile .gitignore .markdownlint.yaml contrib/*.*
+FILES_CC0 = go.sum go.mod Caddyfile .gitignore .markdownlint.yaml contrib/*.* .github/workflows/*.yml
 FILES_APACHE = README.md Makefile *.go 
+
+.PHONY: build tools reuse annotate audit tidy run validate adapt fmt module pre-commit no-dirty
 
 build:
 	xcaddy build --with github.com/kmpm/caddy-events-nats@latest
@@ -53,3 +55,6 @@ module:
 
 pre-commit: audit fmt tidy reuse 
 	@echo "precommit checks passed"
+
+no-dirty:
+	git diff --exit-code
