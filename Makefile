@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: CC0-1.0
 
-FILES_CC0 = go.sum go.mod Caddyfile .gitignore .markdownlint.yaml contrib/*.*
+FILES_CC0 = go.sum go.mod Caddyfile .gitignore .markdownlint.yaml contrib/*.* .github/workflows/*.yml
 FILES_APACHE = README.md Makefile *.go 
 
 .PHONY: build tools reuse annotate audit tidy run validate adapt fmt module pre-commit no-dirty
