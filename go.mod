@@ -1,7 +1,3 @@
-// SPDX-FileCopyrightText: NONE
-//
-// SPDX-License-Identifier: CC0-1.0
-
 module github.com/kmpm/caddy-events-nats
 
 go 1.23.0
