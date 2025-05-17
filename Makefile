@@ -10,7 +10,7 @@ FILES_APACHE = README.md Makefile *.go
 all: tidy audit test validate build
 
 build:
-	xcaddy build --with github.com/kmpm/caddy-events-nats@latest
+	xcaddy build
 
 tools:
 	@echo "installing tools"
