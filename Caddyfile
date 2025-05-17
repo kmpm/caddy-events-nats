@@ -7,7 +7,16 @@
 	events {
 		on "*" nats {
 			subject "caddy.events.{{.Source}}.{{.Type}}"
-			server_url nats://localhost:4222
+
+			# - do we fail if unable to connect -
+			# must_connect no
+
+			# - nats context -
+			nats_context nats_development
+			
+			# - server url if not using context -
+			#server_url nats://localhost:4222
+			
 
 			# - tls server example -
 			# server_url tls://connect.ngs.global

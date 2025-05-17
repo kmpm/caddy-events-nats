@@ -59,8 +59,10 @@ if connection cant be made.
 | Argument      | Default  | Example |
 |---------------|----------|-------------------------------------------------------|
 | server_url    | ""       | "nats://cluster-host1:4222,nats://cluster-host2:4222" |
+| nats_context  | ""       | "nats_development"									   |
 | subject       | ""       | "events.{{.Type}}"                                    |
-| must_publish  | off      | on                                                    |
+| must_publish  | ""       | "yes"                                                 |
+| must_connect  | ""       | "yes"                                                 |
 | auth_user     | ""       | myuser                                                |
 | auth_password | ""       | "supersecret"                                         |
 | auth_token    | ""       | "s3cr3t"                                              |
@@ -69,7 +71,16 @@ if connection cant be made.
 
 #### server_url
 
-Required comma separated string with nats servers to connect to.
+Is comma separated string with nats servers to connect to.
+It is required unless nats_context is set and cannot be used
+together with nats_context.
+
+#### nats_context
+
+This is the name of the nats context to use for connection.
+Cannot be used together with server_url.
+Please note that it must be a context that is available for the 
+user that is executing caddy.
 
 #### subject
 
@@ -79,7 +90,7 @@ the same as for [CloudEvent](#cloudevent).
 
 #### must_publish
 
-If set to `on` then the module with throw and error if...
+If set to `yes` then the module with throw and error if...
 
 - an event is triggered but the NATS client connection is lost
 - the event data in form of a [CloudEvent](#cloudevent) can't be
@@ -87,7 +98,13 @@ If set to `on` then the module with throw and error if...
 - if the subject template throws an error on execution'
 - an error is thrown when publishing the message on the NATS connection.
 
-If set to `off` it will just log a `WARN` on these events but not throw an error.
+If set to `no` or blank it will just log a `WARN` on these events but not throw an error.
+
+#### must_connect
+
+If set to `no` then it will not require connection to the nats server on
+startup. If `must_publish` is enabled then `must_connect` will be set to `yes`.
+
 
 #### auth_user + auth_password
 

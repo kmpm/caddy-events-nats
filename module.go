@@ -7,11 +7,11 @@ package caddynats
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"text/template"
-	"time"
 
 	"bytes"
 
@@ -19,12 +19,15 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyevents"
 	"github.com/nats-io/nats.go"
+	"github.com/synadia-io/orbit.go/natscontext"
 	"go.uber.org/zap"
 )
 
 const (
-	minCredsSize = 800
+	minCredsSize = 400
 )
+
+var verboseMode bool
 
 func init() {
 	caddy.RegisterModule(NatsHandler{})
@@ -34,22 +37,34 @@ type NatsHandler struct {
 	logger *zap.Logger
 
 	nc            *nats.Conn
-	t             *template.Template
+	tmpl          *template.Template
 	connected     bool
 	firstConneted bool
 	natsOptions   []nats.Option
-	mustPublish   bool
-	MustPublish   string `json:"must_publish,omitempty"`
-	ServerURL     string `json:"server_url,omitempty"`
-	Subject       string `json:"subject,omitempty"`
-	AuthUser      string `json:"auth_user,omitempty"`
-	AuthPassword  string `json:"auth_password,omitempty"`
-	AuthToken     string `json:"auth_token,omitempty"`
-	AuthNKey      string `json:"auth_nkey,omitempty"`
-	AuthCreds     string `json:"auth_creds,omitempty"`
+	// mutex         sync.Mutex
+
+	MustPublish  string `json:"must_publish,omitempty"`
+	MustConnect  string `json:"must_connect,omitempty"`
+	ServerURL    string `json:"server_url,omitempty"`
+	NatsContext  string `json:"nats_context,omitempty"`
+	Subject      string `json:"subject,omitempty"`
+	AuthUser     string `json:"auth_user,omitempty"`
+	AuthPassword string `json:"auth_password,omitempty"`
+	AuthToken    string `json:"auth_token,omitempty"`
+	AuthNKey     string `json:"auth_nkey,omitempty"`
+	AuthCreds    string `json:"auth_creds,omitempty"`
+}
+
+func (h *NatsHandler) mustPublish() bool {
+	return isTrue(h.MustPublish)
+}
+
+func (h *NatsHandler) mustConnect() bool {
+	return isTrue(h.MustConnect)
 }
 
 func (NatsHandler) CaddyModule() caddy.ModuleInfo {
+	fmt.Println("***** CaddyModule")
 	return caddy.ModuleInfo{
 		ID:  "events.handlers.nats",
 		New: func() caddy.Module { return new(NatsHandler) },
@@ -58,11 +73,22 @@ func (NatsHandler) CaddyModule() caddy.ModuleInfo {
 
 func (h *NatsHandler) Provision(ctx caddy.Context) error {
 	var err error
+
 	h.logger = ctx.Logger(h)
-	h.logger.Debug("provisioning nats handler")
+	if h.logger == nil {
+		h.logger, err = zap.NewProduction()
+		if err != nil {
+			return fmt.Errorf("failed to create logger: %w", err)
+		}
+	}
+	if verboseMode {
+		h.logger.Debug("about to provision nats handler")
+	}
 	h.validate()
 
-	opts := make([]nats.Option, 0)
+	opts := []nats.Option{
+		nats.Name("caddy-nats"),
+	}
 
 	if h.AuthNKey != "" {
 		opt, err := nats.NkeyOptionFromSeed(h.AuthNKey)
@@ -84,27 +110,21 @@ func (h *NatsHandler) Provision(ctx caddy.Context) error {
 
 	if strings.Contains(h.Subject, "{{") {
 		t := template.New("subject")
-		h.t, err = t.Parse(h.Subject)
+		h.tmpl, err = t.Parse(h.Subject)
 		if err != nil {
 			return fmt.Errorf("failed to parse template: %w", err)
 		}
 	} else {
-		h.t = nil
-	}
-
-	if h.MustPublish == "on" {
-		h.mustPublish = true
-	} else if h.MustPublish == "off" || h.MustPublish == "" {
-		h.mustPublish = false
+		h.tmpl = nil
 	}
 
 	err = h.connect()
 	if err != nil {
 		return fmt.Errorf("failed to connect to nats: %w", err)
 	}
-
-	h.logger.Debug("nats handler provisioned")
-
+	if verboseMode {
+		h.logger.Debug("nats handler provisioned")
+	}
 	return nil
 }
 
@@ -112,10 +132,19 @@ func (h *NatsHandler) connect() error {
 	if h.firstConneted {
 		return nil
 	}
-
-	nc, err := nats.Connect(h.ServerURL, h.natsOptions...)
+	var nc *nats.Conn
+	var err error
+	if h.NatsContext != "" {
+		nc, _, err = natscontext.Connect(h.NatsContext, h.natsOptions...)
+	} else {
+		nc, err = nats.Connect(h.ServerURL, h.natsOptions...)
+	}
 	if err != nil {
-		return err
+		if h.mustConnect() {
+			return fmt.Errorf("failed to connect to nats: %w", err)
+		}
+		h.logger.Warn("failed to connect to nats", zap.Error(err))
+		return nil
 	}
 	h.logger.Info("nats client connected to server", zap.String("server", nc.ConnectedAddr()))
 	h.firstConneted = true
@@ -145,7 +174,9 @@ func (h *NatsHandler) connect() error {
 }
 
 func (h *NatsHandler) Cleanup() error {
-	h.logger.Debug("cleaning up nats handler")
+	if verboseMode {
+		h.logger.Debug("cleaning up nats handler")
+	}
 	if h.nc != nil {
 		h.nc.Close()
 		h.connected = false
@@ -154,35 +185,75 @@ func (h *NatsHandler) Cleanup() error {
 	return nil
 }
 
-func (h *NatsHandler) Handle(ctx context.Context, event caddyevents.Event) error {
+func (h *NatsHandler) Handle(ctx context.Context, event caddy.Event) error {
+
+	h.logger.Debug("handling event",
+		zap.String("event", event.Name()),
+		zap.Bool("connected", h.connected),
+		zap.Bool("has_nc", h.nc != nil),
+		zap.Bool("has_origin", event.Origin() != nil),
+	)
+
 	if !h.connected {
-		if h.mustPublish {
+		// if we are not connected and must_connect is not set
+		// we can just log a warning and return
+		h.logger.Warn("nats not connected")
+
+		// try to reconnect
+		// go func() {
+		err := h.connect()
+		if err != nil {
+			h.logger.Error("failed to recconnect to nats", zap.Error(err))
+		}
+		// }()
+
+		if h.mustPublish() {
 			return fmt.Errorf("nats not connected")
 		}
 		h.logger.Warn("nats not connected")
 		return nil
 	}
+	if h.nc == nil {
+		if verboseMode {
+			h.logger.Debug("nats client is nil")
+		}
+		if h.mustPublish() {
+			return fmt.Errorf("nats client is nil")
+		}
+		return nil
+	}
+
+	if event.Origin() == nil {
+		return errors.New("origin is nil, cannot create message for event")
+	}
 	ce := event.CloudEvent()
-	h.logger.Debug("handling event", zap.String("event", ce.ID), zap.String("source", ce.Source))
-	data, err := json.Marshal(ce)
+	if verboseMode {
+		h.logger.Debug("cloudevent constructed", zap.Any("ce", ce))
+	}
+
+	data, err := json.Marshal(&ce)
 	if err != nil {
-		if h.mustPublish {
+		if h.mustPublish() {
 			return fmt.Errorf("failed to marshal event: %w", err)
 		} else {
 			h.logger.Warn("failed to marshal event", zap.Error(err))
 		}
 	}
 	subj := h.Subject
-	if h.t != nil {
+	preSubj := h.Subject
+	if h.tmpl != nil {
 		var result bytes.Buffer
-		err = h.t.Execute(&result, ce)
+		err = h.tmpl.Execute(&result, ce)
 		if err != nil {
-			if h.mustPublish {
+			if h.mustPublish() {
 				return fmt.Errorf("failed to execute template: %w", err)
 			}
 			h.logger.Warn("failed to execute template", zap.Error(err))
 		}
 		subj = result.String()
+	}
+	if verboseMode && subj != preSubj {
+		h.logger.Debug("subject changed", zap.String("old", preSubj), zap.String("new", subj))
 	}
 	m := &nats.Msg{
 		Subject: subj,
@@ -190,15 +261,13 @@ func (h *NatsHandler) Handle(ctx context.Context, event caddyevents.Event) error
 	}
 	header := make(nats.Header)
 	header.Add("Content-Type", "application/json")
-	if false {
-		header.Add("X-CloudEvent-ID", ce.ID)
-		header.Add("X-CloudEvent-Time", ce.Time.Format(time.RFC3339))
-	}
+	addHeaders(&header, ce)
+
 	m.Header = header
 
 	err = h.nc.PublishMsg(m)
 	if err != nil {
-		if h.mustPublish {
+		if h.mustPublish() {
 			return fmt.Errorf("failed to publish event: %w", err)
 		} else {
 			h.logger.Warn("failed to publish event", zap.Error(err))
@@ -210,25 +279,43 @@ func (h *NatsHandler) Handle(ctx context.Context, event caddyevents.Event) error
 
 // Validate ensures the handler is properly configured.
 func (h *NatsHandler) validate() error {
-	h.logger.Debug("validating nats handler")
-
-	if h.ServerURL == "" {
-		return fmt.Errorf("server url is required")
+	if verboseMode {
+		h.logger.Debug("validating nats handler")
+	}
+	if h.NatsContext != "" && h.ServerURL != "" {
+		return fmt.Errorf("nats_context and server_url cannot be used together")
+	}
+	if h.ServerURL == "" && h.NatsContext == "" {
+		return fmt.Errorf("server_url is required without nats_context")
 	}
 	if h.Subject == "" {
 		return fmt.Errorf("subject is required")
 	}
 	t := template.New("subject")
 	if _, err := t.Parse(h.Subject); err != nil {
-		return fmt.Errorf("failed to parse subject template: %w", err)
+		return fmt.Errorf("failed to parse subject as template: %w", err)
 	}
 
 	if h.MustPublish != "" {
 		//can only be 'on', 'off' or empty
-		if h.MustPublish != "on" && h.MustPublish != "off" {
-			return fmt.Errorf("must_publish must be 'on' or 'off'")
+		if h.MustPublish != "yes" && h.MustPublish != "no" &&
+			h.MustPublish != "on" && h.MustPublish != "off" {
+			return fmt.Errorf("must_publish must be 'yes', 'no'")
 		}
 	}
+	if h.MustConnect != "" {
+		//can only be 'yes' or 'no' with the alternatives 'on', 'off' or empty
+		if h.MustConnect != "yes" && h.MustConnect != "no" &&
+			h.MustConnect != "on" && h.MustConnect != "off" {
+			return fmt.Errorf("must_connect must be 'yes' 'no'")
+		}
+	}
+	if isTrue(h.MustPublish) && !isTrue(h.MustConnect) {
+		// if must_publish is true then must_connect implies
+		// that the connection must be established
+		h.MustConnect = "yes"
+	}
+
 	if h.AuthNKey != "" {
 		//check if file exists
 		if _, err := nats.NkeyOptionFromSeed(h.AuthNKey); err != nil {
@@ -280,6 +367,10 @@ func (h *NatsHandler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	}
 	for d.NextBlock(0) {
 		switch d.Val() {
+		case "nats_context":
+			if !d.Args(&h.NatsContext) {
+				return d.ArgErr()
+			}
 		case "server_url":
 			if !d.Args(&h.ServerURL) {
 				return d.ArgErr()
@@ -312,6 +403,10 @@ func (h *NatsHandler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			if !d.Args(&h.MustPublish) {
 				return d.ArgErr()
 			}
+		case "must_connect":
+			if !d.Args(&h.MustConnect) {
+				return d.ArgErr()
+			}
 
 		default:
 			return d.Errf("unknown property '%s'", d.Val())
@@ -322,8 +417,9 @@ func (h *NatsHandler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 }
 
 var (
-	_ caddyfile.Unmarshaler = (*NatsHandler)(nil)
+	_ caddy.Module          = (*NatsHandler)(nil)
 	_ caddy.Provisioner     = (*NatsHandler)(nil)
-	_ caddyevents.Handler   = (*NatsHandler)(nil)
 	_ caddy.CleanerUpper    = (*NatsHandler)(nil)
+	_ caddyevents.Handler   = (*NatsHandler)(nil)
+	_ caddyfile.Unmarshaler = (*NatsHandler)(nil)
 )

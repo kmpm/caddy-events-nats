@@ -22,9 +22,6 @@ jobs:
       with:
         go-version: '1.24'
 
-    - name: Tidy code
-      run: make tidy
-
     - name: Install tools
       run: make tools
 

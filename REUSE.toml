@@ -12,6 +12,8 @@ agreements with their respective provider and does not alter, expand or
 supersede any terms of these additional agreements.
 """
 
+
+
 [[annotations]]
 path = "**"
 precedence = "closest"
@@ -19,7 +21,7 @@ SPDX-FileCopyrightText = "Peter Magnusson <me@kmpm.se>"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
-path = ["go.mod", "go.sum", "Makefile", "Caddyfile", "contrib/user.nk"]
+path = ["go.mod", "go.sum", "Makefile", "Caddyfile", "contrib/user.nk", "testdata/*"]
 precedence = "closest"
 SPDX-FileCopyrightText = "NONE"
 SPDX-License-Identifier = "CC0-1.0"
